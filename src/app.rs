@@ -50,6 +50,7 @@ pub enum Notice {
 enum TaskResult {
     Activated(Box<StoredActivation>),
     KeysRefreshed,
+    Deactivated,
     Failed(String),
 }
 
@@ -127,6 +128,32 @@ impl LicenseApp {
         });
     }
 
+    pub fn deactivate(&mut self, context: egui::Context) {
+        let Some(activation) = self.activation.clone() else {
+            return;
+        };
+        let Some(key) = activation.license_key else {
+            self.notice = Some(Notice::Error("离线激活没有可撤销的在线设备席位".into()));
+            return;
+        };
+        let Some((config, storage)) = self.dependencies() else {
+            return;
+        };
+        self.busy = true;
+        self.notice = Some(Notice::Info("正在取消激活...".into()));
+        let (sender, receiver) = mpsc::channel();
+        self.receiver = Some(receiver);
+        thread::spawn(move || {
+            let result = ApiClient::new(&config.api_url)
+                .and_then(|api| api.unbind(&key, &activation.fingerprint))
+                .and_then(|_| storage.clear_activation())
+                .map(|_| TaskResult::Deactivated)
+                .unwrap_or_else(|error| TaskResult::Failed(error.user_message()));
+            let _ = sender.send(result);
+            context.request_repaint();
+        });
+    }
+
     fn dependencies(&mut self) -> Option<(AppConfig, Storage)> {
         match (self.config.clone(), self.storage.clone()) {
             (Some(config), Some(storage)) => Some((config, storage)),
@@ -190,6 +217,11 @@ impl LicenseApp {
                     self.busy = false;
                 }
                 TaskResult::KeysRefreshed => {}
+                TaskResult::Deactivated => {
+                    self.activation = None;
+                    self.notice = Some(Notice::Success("许可证已取消激活".into()));
+                    self.busy = false;
+                }
                 TaskResult::Failed(message) if self.busy => {
                     self.notice = Some(Notice::Error(message));
                     self.busy = false;
@@ -225,13 +257,21 @@ fn online_activation(
         storage.save_keys(&keys)?;
     }
     let ttl = license.policy.max_offline_ttl_seconds.clamp(1, MAX_RPC_TTL);
-    let compact = api.issue_online(license_key, &fingerprint, ttl)?;
+    api.bind(license_key, &fingerprint)?;
+    let compact = match api.issue_online(license_key, &fingerprint, ttl) {
+        Ok(compact) => compact,
+        Err(error) => {
+            let _ = api.unbind(license_key, &fingerprint);
+            return Err(error);
+        }
+    };
     let claims = verify_with_refresh(config, storage, &api, &compact, &fingerprint)?;
     let activation = StoredActivation {
         token: compact,
         claims,
         fingerprint,
         source: ActivationSource::Online,
+        license_key: Some(license_key.to_owned()),
         license: Some(license),
         activated_at: now_epoch(),
     };
@@ -252,6 +292,7 @@ fn offline_activation(
         claims,
         fingerprint,
         source: ActivationSource::Offline,
+        license_key: None,
         license: None,
         activated_at: now_epoch(),
     };

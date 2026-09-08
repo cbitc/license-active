@@ -59,7 +59,8 @@ pub fn render(app: &mut LicenseApp, context: &egui::Context) {
         notice(app, ui);
         ui.add_space(14.0);
         if let Some(activation) = &app.activation {
-            activation_details(activation, ui);
+            let activation = activation.clone();
+            activation_details(&activation, ui, app, context);
         }
     });
 }
@@ -117,7 +118,12 @@ fn notice(app: &LicenseApp, ui: &mut egui::Ui) {
     }
 }
 
-fn activation_details(activation: &StoredActivation, ui: &mut egui::Ui) {
+fn activation_details(
+    activation: &StoredActivation,
+    ui: &mut egui::Ui,
+    app: &mut LicenseApp,
+    context: &egui::Context,
+) {
     ui.separator();
     ui.add_space(8.0);
     ui.horizontal(|ui| {
@@ -165,11 +171,18 @@ fn activation_details(activation: &StoredActivation, ui: &mut egui::Ui) {
         });
     }
     ui.add_space(14.0);
+    let can_deactivate = matches!(activation.source, ActivationSource::Online)
+        && activation.license_key.is_some()
+        && !app.is_busy();
     let button = ui.add_enabled(
-        false,
+        can_deactivate,
         egui::Button::new("取消激活").min_size([100.0, 34.0].into()),
     );
-    button.on_disabled_hover_text("当前服务端尚未提供安全的客户端取消激活接口");
+    if button.clicked() {
+        app.deactivate(context.clone());
+    } else if !can_deactivate {
+        button.on_disabled_hover_text("只有在线激活许可证可以取消激活");
+    }
 }
 
 fn row(ui: &mut egui::Ui, label: &str, value: &str) {

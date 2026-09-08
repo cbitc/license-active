@@ -102,6 +102,13 @@ impl Storage {
         })
     }
 
+    pub fn clear_activation(&self) -> Result<()> {
+        self.with_connection(|connection| {
+            connection.execute("DELETE FROM activation WHERE id = 1", [])?;
+            Ok(())
+        })
+    }
+
     fn with_connection<T>(&self, operation: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         let connection = Connection::open(&self.path)?;
         connection.busy_timeout(std::time::Duration::from_secs(3))?;
@@ -120,6 +127,7 @@ mod tests {
             token: id.into(),
             fingerprint: "fp".into(),
             source: ActivationSource::Offline,
+            license_key: None,
             activated_at: 100,
             license: None,
             claims: TokenClaims {
@@ -153,5 +161,7 @@ mod tests {
             storage.load_activation().unwrap().unwrap().claims.sub,
             "second"
         );
+        storage.clear_activation().unwrap();
+        assert!(storage.load_activation().unwrap().is_none());
     }
 }

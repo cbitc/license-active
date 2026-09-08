@@ -75,6 +75,8 @@ pub struct StoredActivation {
     pub claims: TokenClaims,
     pub fingerprint: String,
     pub source: ActivationSource,
+    #[serde(default)]
+    pub license_key: Option<String>,
     pub license: Option<LicenseDetails>,
     pub activated_at: i64,
 }

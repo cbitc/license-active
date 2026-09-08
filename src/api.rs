@@ -31,12 +31,7 @@ impl ApiClient {
     }
 
     pub fn license(&self, key: &str) -> Result<LicenseDetails> {
-        let mut url = self.endpoint("api/v1/portal/licenses")?;
-        url.path_segments_mut()
-            .map_err(|_| AppError::Config("服务地址不能作为 API 基础地址".into()))?
-            .push(key);
-        let response = self.client.get(url).send().map_err(network_error)?;
-        parse_data_response(response)
+        self.call_rpc("getLicenseByKey", LicenseKeyParams { license_key: key })
     }
 
     pub fn signing_keys(&self) -> Result<Vec<PublicJwk>> {
@@ -53,14 +48,47 @@ impl ApiClient {
     }
 
     pub fn issue_online(&self, key: &str, fingerprint: &str, ttl: u64) -> Result<String> {
-        let body = RpcRequest {
-            jsonrpc: "2.0",
-            method: "issueMachineBindingOnline",
-            params: RpcParams {
+        self.call_rpc(
+            "issue",
+            IssueParams {
                 license_key: key,
                 fingerprint,
                 ttl: ttl.min(MAX_RPC_TTL),
             },
+        )
+    }
+
+    pub fn bind(&self, key: &str, fingerprint: &str) -> Result<()> {
+        self.call_rpc::<serde_json::Value, _>(
+            "bind",
+            MachineParams {
+                license_key: key,
+                fingerprint,
+            },
+        )?;
+        Ok(())
+    }
+
+    pub fn unbind(&self, key: &str, fingerprint: &str) -> Result<()> {
+        self.call_rpc::<serde_json::Value, _>(
+            "unbind",
+            MachineParams {
+                license_key: key,
+                fingerprint,
+            },
+        )?;
+        Ok(())
+    }
+
+    fn call_rpc<T: DeserializeOwned, P: Serialize>(
+        &self,
+        method: &'static str,
+        params: P,
+    ) -> Result<T> {
+        let body = RpcRequest {
+            jsonrpc: "2.0",
+            method,
+            params,
         };
         let response = self
             .client
@@ -73,19 +101,15 @@ impl ApiClient {
             .json()
             .map_err(|_| AppError::Protocol("无法解析激活服务响应".into()))?;
         if let Some(error) = parsed.error {
-            let code = error
-                .data
-                .as_ref()
-                .and_then(|data| data.get("code"))
-                .and_then(|value| value.as_str());
-            return Err(AppError::server(code, &error.message));
+            return Err(AppError::server_code(&error.message, error.data.as_ref()));
         }
         if !status.is_success() {
             return Err(AppError::Protocol(format!("激活服务返回 HTTP {status}")));
         }
         parsed
             .result
-            .ok_or_else(|| AppError::Protocol("激活服务未返回许可证令牌".into()))
+            .ok_or_else(|| AppError::Protocol("许可证服务未返回结果".into()))
+            .and_then(|value| serde_json::from_value(value).map_err(AppError::from))
     }
 
     fn endpoint(&self, path: &str) -> Result<Url> {
@@ -123,17 +147,6 @@ fn network_error(error: reqwest::Error) -> AppError {
     AppError::Network(message)
 }
 
-fn parse_data_response<T: DeserializeOwned>(response: reqwest::blocking::Response) -> Result<T> {
-    let status = response.status();
-    if status.is_success() {
-        return response
-            .json::<DataResponse<T>>()
-            .map(|body| body.data)
-            .map_err(|_| AppError::Protocol("无法解析许可证服务响应".into()));
-    }
-    parse_http_error(response, status)
-}
-
 fn parse_json_response<T: DeserializeOwned>(response: reqwest::blocking::Response) -> Result<T> {
     let status = response.status();
     if status.is_success() {
@@ -159,11 +172,6 @@ fn parse_http_error<T>(response: reqwest::blocking::Response, status: StatusCode
 }
 
 #[derive(Deserialize)]
-struct DataResponse<T> {
-    data: T,
-}
-
-#[derive(Deserialize)]
 struct KeysResponse {
     keys: Vec<PublicJwk>,
 }
@@ -180,15 +188,28 @@ struct HttpError {
 }
 
 #[derive(Serialize)]
-struct RpcRequest<'a> {
+struct RpcRequest<P> {
     jsonrpc: &'static str,
     method: &'static str,
-    params: RpcParams<'a>,
+    params: P,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RpcParams<'a> {
+struct LicenseKeyParams<'a> {
+    license_key: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MachineParams<'a> {
+    license_key: &'a str,
+    fingerprint: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IssueParams<'a> {
     license_key: &'a str,
     fingerprint: &'a str,
     ttl: u64,
@@ -196,7 +217,7 @@ struct RpcParams<'a> {
 
 #[derive(Deserialize)]
 struct RpcResponse {
-    result: Option<String>,
+    result: Option<serde_json::Value>,
     error: Option<RpcError>,
 }
 
