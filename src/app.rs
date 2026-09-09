@@ -233,12 +233,15 @@ impl LicenseApp {
 }
 
 impl eframe::App for LicenseApp {
-    fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll();
-        ui::render(self, context);
         if self.busy {
             context.request_repaint_after(std::time::Duration::from_millis(100));
         }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        ui::render(self, ui);
     }
 }
 
