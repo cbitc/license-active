@@ -59,7 +59,6 @@ pub fn render(app: &mut LicenseApp, ui: &mut egui::Ui) {
                             .description("管理当前设备的软件许可证"),
                     );
 
-                    // 未绑定：只提供输入和激活入口（bind）
                     if app.activation.is_none() {
                         let mut tab_index = match app.tab {
                             ActivationTab::Online => 0,
@@ -90,7 +89,6 @@ pub fn render(app: &mut LicenseApp, ui: &mut egui::Ui) {
                         notice(app, ui);
                     }
 
-                    // 已绑定：只提供当前许可证信息和解绑入口（unbind）
                     if let Some(activation) = app.activation.clone() {
                         ui.add_space(14.0);
                         activation_details(&activation, ui, app);

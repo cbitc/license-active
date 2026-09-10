@@ -245,7 +245,6 @@ fn online_activation(
 ) -> Result<Activation> {
     let fingerprint = fingerprint::current()?;
     let api = ApiClient::new(&config.api_url)?;
-    // license 详情只用于策略校验（requireFingerprint / TTL），不持久化 —— 权威信息以令牌为准
     let license = api.license(license_key)?;
     if !license.policy.require_fingerprint {
         return Err(AppError::Protocol("该许可证策略未启用设备绑定".into()));
@@ -255,7 +254,6 @@ fn online_activation(
     }
     let ttl = license.policy.max_offline_ttl_seconds.clamp(1, MAX_RPC_TTL);
     api.bind(license_key, &fingerprint)?;
-    // bind 已占用服务器席位，之后的任何失败都要补偿回滚，避免留下"幽灵绑定"
     let issued = issue_and_store(config, storage, &api, license_key, &fingerprint, ttl);
     match issued {
         Ok(activation) => Ok(activation),
@@ -305,7 +303,6 @@ fn offline_activation(config: &AppConfig, storage: &Storage, compact: &str) -> R
 fn unbind_activation(config: &AppConfig, storage: &Storage, activation: &Activation) -> TaskResult {
     let key = activation.claims.license_key.trim();
     if activation.source == ActivationSource::Offline {
-        // 离线激活只写了本地令牌，未占用服务器席位，直接清除即可
         return match storage.clear_activation() {
             Ok(()) => TaskResult::Deactivated {
                 license_key: key.to_owned(),
@@ -325,7 +322,6 @@ fn unbind_activation(config: &AppConfig, storage: &Storage, activation: &Activat
             license_key: key.to_owned(),
         },
         Err(error) => {
-            // 服务器已解绑但本地清理失败：尽力重新 bind 恢复一致性，失败时提示重试（服务器 unbind 幂等，可恢复）
             let rollback_ok = api.bind(key, &activation.fingerprint).is_ok();
             let message = if rollback_ok {
                 format!(
@@ -343,9 +339,6 @@ fn unbind_activation(config: &AppConfig, storage: &Storage, activation: &Activat
     }
 }
 
-/// 启动时的本地加载：不访问服务器，仅用本地缓存的公钥校验离线令牌，
-/// 校验通过后从令牌新鲜解析 claims 组装运行时状态（存库的派生字段一律不信任）。
-/// 校验失败（签名/版本/过期/设备不符）会清空本地令牌；基础设施错误则保留令牌以待下次启动。
 fn load_local_activation(
     config: &AppConfig,
     storage: &Storage,
@@ -521,13 +514,11 @@ mod tests {
         let (activation, notice) = load_local_activation(&test_config(), &storage);
         let activation = activation.expect("valid token must load");
         assert!(notice.is_none());
-        // claims 必须是从令牌新鲜解析的派生数据
         assert_eq!(activation.claims.license_key, "LIC-TEST");
         assert_eq!(activation.claims.product_name, "产品");
         assert_eq!(activation.claims.entitlements[0].name, "功能A");
         assert_eq!(activation.fingerprint, fingerprint);
         assert_eq!(activation.source, ActivationSource::Offline);
-        // 落库的只有 token/source/activated_at
         assert_eq!(
             storage.load_activation().unwrap().unwrap().token,
             activation.token
