@@ -20,7 +20,6 @@ impl ApiClient {
     pub fn new(base_url: &str) -> Result<Self> {
         let base_url = Url::parse(base_url)
             .map_err(|error| AppError::Config(format!("服务地址无效: {error}")))?;
-        validate_transport(&base_url)?;
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(15))
@@ -122,22 +121,6 @@ impl ApiClient {
     }
 }
 
-fn validate_transport(url: &Url) -> Result<()> {
-    if url.scheme() == "https" {
-        return Ok(());
-    }
-    let local = url.host_str().is_some_and(|host| {
-        host.eq_ignore_ascii_case("localhost")
-            || host
-                .parse::<std::net::IpAddr>()
-                .is_ok_and(|ip| ip.is_loopback())
-    });
-    if url.scheme() == "http" && local {
-        return Ok(());
-    }
-    Err(AppError::Config("远程许可证服务必须使用 HTTPS".into()))
-}
-
 fn network_error(error: reqwest::Error) -> AppError {
     let message = if error.is_timeout() {
         "连接许可证服务超时".into()
@@ -230,13 +213,6 @@ struct RpcError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn rejects_insecure_remote_urls() {
-        assert!(ApiClient::new("http://example.com").is_err());
-        assert!(ApiClient::new("http://localhost:3000").is_ok());
-        assert!(ApiClient::new("https://example.com").is_ok());
-    }
 
     #[test]
     fn ttl_limit_matches_server_contract() {

@@ -17,7 +17,6 @@ struct Header {
 pub fn verify(
     compact: &str,
     keys: &[PublicJwk],
-    expected_issuer: &str,
     fingerprint: &str,
     now: i64,
 ) -> Result<TokenClaims> {
@@ -54,7 +53,7 @@ pub fn verify(
         .map_err(|_| AppError::Token("签名验证失败".into()))?;
 
     let claims: TokenClaims = decode_json(parts[1])?;
-    validate_claims(&claims, expected_issuer, fingerprint, now)?;
+    validate_claims(&claims, fingerprint, now)?;
     Ok(claims)
 }
 
@@ -65,17 +64,9 @@ fn decode_json<T: serde::de::DeserializeOwned>(encoded: &str) -> Result<T> {
     serde_json::from_slice(&bytes).map_err(|_| AppError::Token("令牌内容无效".into()))
 }
 
-fn validate_claims(
-    claims: &TokenClaims,
-    expected_issuer: &str,
-    fingerprint: &str,
-    now: i64,
-) -> Result<()> {
+fn validate_claims(claims: &TokenClaims, fingerprint: &str, now: i64) -> Result<()> {
     if claims.version != 3 {
         return Err(AppError::Token("令牌版本不受支持".into()));
-    }
-    if claims.iss != expected_issuer {
-        return Err(AppError::Token("令牌签发方不匹配".into()));
     }
     if claims.sub.trim().is_empty()
         || claims.aud.trim().is_empty()
@@ -150,7 +141,7 @@ mod tests {
     #[test]
     fn verifies_valid_token() {
         let (token, key) = signed_token(json!({}));
-        assert!(verify(&token, &[key], "issuer", "fingerprint", 150).is_ok());
+        assert!(verify(&token, &[key], "fingerprint", 150).is_ok());
     }
 
     #[test]
@@ -158,7 +149,6 @@ mod tests {
         for change in [
             json!({"version": 1}),
             json!({"version": 2}),
-            json!({"iss": "other"}),
             json!({"nbf": 160}),
             json!({"exp": 150}),
             json!({"fingerprintSha256": "other"}),
@@ -166,16 +156,16 @@ mod tests {
             json!({"licenseKey": "   "}),
         ] {
             let (token, key) = signed_token(change);
-            assert!(verify(&token, &[key], "issuer", "fingerprint", 150).is_err());
+            assert!(verify(&token, &[key], "fingerprint", 150).is_err());
         }
         let (mut token, key) = signed_token(json!({}));
         token.push('x');
-        assert!(verify(&token, &[key], "issuer", "fingerprint", 150).is_err());
+        assert!(verify(&token, &[key], "fingerprint", 150).is_err());
     }
 
     #[test]
     fn rejects_unknown_key() {
         let (token, _) = signed_token(json!({}));
-        assert!(verify(&token, &[], "issuer", "fingerprint", 150).is_err());
+        assert!(verify(&token, &[], "fingerprint", 150).is_err());
     }
 }

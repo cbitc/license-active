@@ -16,6 +16,8 @@ use error::{AppError, Result};
 use storage::Storage;
 
 fn main() -> eframe::Result<()> {
+    dotenv::dotenv().ok();
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([760.0, 680.0])

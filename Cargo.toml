@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+dotenv = "0.15"
 base64 = "0.22"
 chrono = "0.4"
 directories = "6"
@@ -12,7 +13,11 @@ eframe = { version = "0.35", default-features = false, features = ["glow"] }
 egui-components = "0.3"
 hex = "0.4"
 hostname = "0.4"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = [
+  "blocking",
+  "json",
+  "rustls-tls",
+] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

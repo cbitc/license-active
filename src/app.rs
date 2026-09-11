@@ -19,7 +19,6 @@ use crate::{
 #[derive(Clone)]
 pub struct AppConfig {
     pub api_url: String,
-    pub issuer: String,
 }
 
 impl AppConfig {
@@ -27,11 +26,7 @@ impl AppConfig {
         let api_url =
             env::var("LICENSE_API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".into());
         ApiClient::new(&api_url)?;
-        Ok(Self {
-            api_url,
-            issuer: env::var("LICENSE_EXPECTED_ISSUER")
-                .unwrap_or_else(|_| "MDT_LICENSE_SERVER".into()),
-        })
+        Ok(Self { api_url })
     }
 }
 
@@ -68,7 +63,7 @@ pub struct LicenseApp {
 
 impl LicenseApp {
     pub fn new(config: AppConfig, storage: Storage) -> Self {
-        let (activation, notice) = load_local_activation(&config, &storage);
+        let (activation, notice) = load_local_activation(&storage);
         let mut app = Self {
             config: Some(config),
             storage: Some(storage),
@@ -254,7 +249,7 @@ fn online_activation(
     }
     let ttl = license.policy.max_offline_ttl_seconds.clamp(1, MAX_RPC_TTL);
     api.bind(license_key, &fingerprint)?;
-    let issued = issue_and_store(config, storage, &api, license_key, &fingerprint, ttl);
+    let issued = issue_and_store(storage, &api, license_key, &fingerprint, ttl);
     match issued {
         Ok(activation) => Ok(activation),
         Err(error) => {
@@ -265,7 +260,6 @@ fn online_activation(
 }
 
 fn issue_and_store(
-    config: &AppConfig,
     storage: &Storage,
     api: &ApiClient,
     license_key: &str,
@@ -273,7 +267,7 @@ fn issue_and_store(
     ttl: u64,
 ) -> Result<Activation> {
     let compact = api.issue_online(license_key, fingerprint, ttl)?;
-    let claims = verify_with_refresh(config, storage, api, &compact, fingerprint)?;
+    let claims = verify_with_refresh(storage, api, &compact, fingerprint)?;
     let activation = Activation {
         token: compact,
         source: ActivationSource::Online,
@@ -288,7 +282,7 @@ fn issue_and_store(
 fn offline_activation(config: &AppConfig, storage: &Storage, compact: &str) -> Result<Activation> {
     let fingerprint = fingerprint::current()?;
     let api = ApiClient::new(&config.api_url)?;
-    let claims = verify_with_refresh(config, storage, &api, compact, &fingerprint)?;
+    let claims = verify_with_refresh(storage, &api, compact, &fingerprint)?;
     let activation = Activation {
         token: compact.into(),
         source: ActivationSource::Offline,
@@ -339,10 +333,7 @@ fn unbind_activation(config: &AppConfig, storage: &Storage, activation: &Activat
     }
 }
 
-fn load_local_activation(
-    config: &AppConfig,
-    storage: &Storage,
-) -> (Option<Activation>, Option<Notice>) {
+fn load_local_activation(storage: &Storage) -> (Option<Activation>, Option<Notice>) {
     let stored = match storage.load_activation() {
         Ok(stored) => stored,
         Err(error) => {
@@ -382,13 +373,7 @@ fn load_local_activation(
             );
         }
     };
-    match token::verify(
-        &stored.token,
-        &keys,
-        &config.issuer,
-        &fingerprint,
-        now_epoch(),
-    ) {
+    match token::verify(&stored.token, &keys, &fingerprint, now_epoch()) {
         Ok(claims) => (
             Some(Activation::from_verified(stored, claims, fingerprint)),
             None,
@@ -404,31 +389,18 @@ fn load_local_activation(
 }
 
 fn verify_with_refresh(
-    config: &AppConfig,
     storage: &Storage,
     api: &ApiClient,
     compact: &str,
     fingerprint: &str,
 ) -> Result<crate::model::TokenClaims> {
-    let first = token::verify(
-        compact,
-        &storage.load_keys()?,
-        &config.issuer,
-        fingerprint,
-        now_epoch(),
-    );
+    let first = token::verify(compact, &storage.load_keys()?, fingerprint, now_epoch());
     if first.is_ok() {
         return first;
     }
     if let Ok(keys) = api.signing_keys() {
         storage.save_keys(&keys)?;
-        return token::verify(
-            compact,
-            &storage.load_keys()?,
-            &config.issuer,
-            fingerprint,
-            now_epoch(),
-        );
+        return token::verify(compact, &storage.load_keys()?, fingerprint, now_epoch());
     }
     first
 }
@@ -448,13 +420,6 @@ mod tests {
 
     use super::*;
     use crate::model::{PublicJwk, StoredActivation};
-
-    fn test_config() -> AppConfig {
-        AppConfig {
-            api_url: "http://127.0.0.1:3000".into(),
-            issuer: "test-issuer".into(),
-        }
-    }
 
     fn signed_v3_token(claims: serde_json::Value) -> (String, PublicJwk) {
         let signing = SigningKey::from_bytes(&[9_u8; 32]);
@@ -511,7 +476,7 @@ mod tests {
         storage.save_keys(&[jwk]).unwrap();
         store_offline_activation(&storage, token);
 
-        let (activation, notice) = load_local_activation(&test_config(), &storage);
+        let (activation, notice) = load_local_activation(&storage);
         let activation = activation.expect("valid token must load");
         assert!(notice.is_none());
         assert_eq!(activation.claims.license_key, "LIC-TEST");
@@ -530,7 +495,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let storage = Storage::open(temp.path().join("test.db")).unwrap();
 
-        let (activation, notice) = load_local_activation(&test_config(), &storage);
+        let (activation, notice) = load_local_activation(&storage);
         assert!(activation.is_none());
         assert!(notice.is_none());
     }
@@ -545,7 +510,7 @@ mod tests {
         storage.save_keys(&[jwk]).unwrap();
         store_offline_activation(&storage, token);
 
-        let (activation, notice) = load_local_activation(&test_config(), &storage);
+        let (activation, notice) = load_local_activation(&storage);
         assert!(activation.is_none());
         assert!(matches!(notice, Some(Notice::Error(_))));
         assert!(storage.load_activation().unwrap().is_none());
@@ -561,7 +526,7 @@ mod tests {
         storage.save_keys(&[jwk]).unwrap();
         store_offline_activation(&storage, token);
 
-        let (activation, notice) = load_local_activation(&test_config(), &storage);
+        let (activation, notice) = load_local_activation(&storage);
         assert!(activation.is_none());
         assert!(matches!(notice, Some(Notice::Error(_))));
         assert!(storage.load_activation().unwrap().is_none());

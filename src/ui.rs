@@ -104,7 +104,7 @@ fn online_form(app: &mut LicenseApp, ui: &mut egui::Ui, context: egui::Context) 
 
     Card::new()
         .title("在线激活")
-        .description("连接许可证服务，为当前设备注册一个机器席位")
+        .description("在线为当前设备注册一个机器席位")
         .divider()
         .outline()
         .show(ui, |ui| {
@@ -135,7 +135,7 @@ fn offline_form(app: &mut LicenseApp, ui: &mut egui::Ui, context: egui::Context)
 
     Card::new()
         .title("离线激活")
-        .description("粘贴已签发的离线令牌，在无网络环境中验证当前设备")
+        .description("粘贴已签发的离线令牌，在离线环境中验证当前设备")
         .divider()
         .outline()
         .show(ui, |ui| {
