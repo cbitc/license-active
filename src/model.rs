@@ -82,8 +82,6 @@ pub struct PublicJwk {
     pub key_use: Option<String>,
 }
 
-/// 持久化到本地的唯一数据：token 是签名保护、自包含的权威数据源，
-/// claims 等派生信息在运行时从 token 新鲜解析，不落库。
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StoredActivation {
     pub token: String,
@@ -91,7 +89,6 @@ pub struct StoredActivation {
     pub activated_at: i64,
 }
 
-/// 运行时状态：StoredActivation + 从 token 解析出的 claims + 当前设备指纹。
 #[derive(Clone, Debug)]
 pub struct Activation {
     pub token: String,
@@ -102,7 +99,11 @@ pub struct Activation {
 }
 
 impl Activation {
-    pub fn from_verified(stored: StoredActivation, claims: TokenClaims, fingerprint: String) -> Self {
+    pub fn from_verified(
+        stored: StoredActivation,
+        claims: TokenClaims,
+        fingerprint: String,
+    ) -> Self {
         Self {
             token: stored.token,
             source: stored.source,

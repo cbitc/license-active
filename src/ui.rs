@@ -196,7 +196,6 @@ fn activation_details(activation: &Activation, ui: &mut egui::Ui, app: &mut Lice
 
     Card::new()
         .title("当前许可证")
-        .description("已在本地验证并保存的许可证信息")
         .divider()
         .outline()
         .show(ui, |ui| {
@@ -206,17 +205,17 @@ fn activation_details(activation: &Activation, ui: &mut egui::Ui, app: &mut Lice
             });
 
             ui.add_space(12.0);
-            // 展示信息一律取自令牌 claims（签名保护），不使用本地副本
             let mut details = DescriptionList::new().label_width(112.0);
             details = details
-                .item(
-                    "产品",
-                    format!("{} ({})", claims.product_name, claims.product_code),
-                )
-                .item("策略", claims.policy_name.clone())
                 .item("许可证密钥", wrap_identifier(&claims.license_key))
-                .item("许可证 ID", wrap_identifier(&claims.sub))
-                .item("令牌有效期", format_time(claims.exp));
+                .item("令牌有效期", format_time(claims.exp))
+                .item(
+                    "许可证到期",
+                    match claims.license_expires_at {
+                        Some(t) => format_time(t),
+                        None => "N/A".to_string(),
+                    },
+                );
             if let Some(expiry) = claims.license_expires_at {
                 details = details.item("许可证有效期", format_time(expiry));
             }
