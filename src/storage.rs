@@ -118,34 +118,15 @@ impl Storage {
 
 #[cfg(test)]
 mod tests {
-    use crate::model::{ActivationSource, TokenClaims};
+    use crate::model::ActivationSource;
 
     use super::*;
 
     fn activation(id: &str) -> StoredActivation {
         StoredActivation {
             token: id.into(),
-            fingerprint: "fp".into(),
             source: ActivationSource::Offline,
-            license_key: None,
             activated_at: 100,
-            license: None,
-            claims: TokenClaims {
-                version: 2,
-                meta: serde_json::json!({}),
-                iss: "issuer".into(),
-                aud: "aud".into(),
-                sub: id.into(),
-                jti: "jti".into(),
-                policy_id: "policy".into(),
-                user_id: None,
-                entitlements: vec![],
-                fingerprint_sha256: None,
-                iat: 1,
-                nbf: 1,
-                exp: 2,
-                license_expires_at: None,
-            },
         }
     }
 
@@ -158,7 +139,7 @@ mod tests {
         storage.save_activation(&activation("first")).unwrap();
         storage.save_activation(&activation("second")).unwrap();
         assert_eq!(
-            storage.load_activation().unwrap().unwrap().claims.sub,
+            storage.load_activation().unwrap().unwrap().token,
             "second"
         );
         storage.clear_activation().unwrap();

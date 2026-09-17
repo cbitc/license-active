@@ -71,7 +71,7 @@ fn validate_claims(
     fingerprint: &str,
     now: i64,
 ) -> Result<()> {
-    if claims.version != 2 {
+    if claims.version != 3 {
         return Err(AppError::Token("令牌版本不受支持".into()));
     }
     if claims.iss != expected_issuer {
@@ -81,13 +81,14 @@ fn validate_claims(
         || claims.aud.trim().is_empty()
         || claims.jti.trim().is_empty()
         || claims.policy_id.trim().is_empty()
+        || claims.license_key.trim().is_empty()
     {
         return Err(AppError::Token("令牌缺少必要声明".into()));
     }
     if claims
         .entitlements
         .iter()
-        .any(|item| item.trim().is_empty())
+        .any(|item| item.code.trim().is_empty())
     {
         return Err(AppError::Token("令牌授权项无效".into()));
     }
@@ -119,9 +120,12 @@ mod tests {
         let signing = SigningKey::from_bytes(&[7_u8; 32]);
         let header = json!({"alg":"EdDSA","typ":"license+jwt","kid":"test-key"});
         let mut claims = json!({
-            "version": 2, "meta": {}, "iss": "issuer", "aud": "product",
+            "version": 3, "meta": {}, "iss": "issuer", "aud": "product",
             "sub": "license", "jti": "issuance", "policyId": "policy",
-            "entitlements": ["FEATURE_A"], "fingerprintSha256": "fingerprint",
+            "licenseKey": "LIC-TEST", "productCode": "product",
+            "productName": "产品", "policyName": "策略", "issuedAt": 100,
+            "entitlements": [{"code": "FEATURE_A", "name": "功能A"}],
+            "fingerprintSha256": "fingerprint",
             "iat": 100, "nbf": 100, "exp": 200
         });
         for (key, value) in overrides.as_object().unwrap() {
@@ -153,10 +157,13 @@ mod tests {
     fn rejects_invalid_claims_and_signature() {
         for change in [
             json!({"version": 1}),
+            json!({"version": 2}),
             json!({"iss": "other"}),
             json!({"nbf": 160}),
             json!({"exp": 150}),
             json!({"fingerprintSha256": "other"}),
+            json!({"entitlements": [{"code": "  ", "name": "功能A"}]}),
+            json!({"licenseKey": "   "}),
         ] {
             let (token, key) = signed_token(change);
             assert!(verify(&token, &[key], "issuer", "fingerprint", 150).is_err());

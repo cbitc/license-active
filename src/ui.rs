@@ -9,7 +9,7 @@ use egui_components::{
 
 use crate::{
     app::{ActivationTab, LicenseApp, Notice},
-    model::{ActivationSource, StoredActivation},
+    model::{Activation, ActivationSource},
 };
 
 pub fn configure_fonts(context: &egui::Context) {
@@ -59,27 +59,30 @@ pub fn render(app: &mut LicenseApp, ui: &mut egui::Ui) {
                             .description("管理当前设备的软件许可证"),
                     );
 
-                    let mut tab_index = match app.tab {
-                        ActivationTab::Online => 0,
-                        ActivationTab::Offline => 1,
-                    };
-                    ui.add_space(20.0);
-                    Tabs::new(&mut tab_index)
-                        .segmented()
-                        .tab("在线激活")
-                        .tab("离线激活")
-                        .show(ui);
-                    app.tab = if tab_index == 0 {
-                        ActivationTab::Online
-                    } else {
-                        ActivationTab::Offline
-                    };
+                    // 未绑定：只提供输入和激活入口（bind）
+                    if app.activation.is_none() {
+                        let mut tab_index = match app.tab {
+                            ActivationTab::Online => 0,
+                            ActivationTab::Offline => 1,
+                        };
+                        ui.add_space(20.0);
+                        Tabs::new(&mut tab_index)
+                            .segmented()
+                            .tab("在线激活")
+                            .tab("离线激活")
+                            .show(ui);
+                        app.tab = if tab_index == 0 {
+                            ActivationTab::Online
+                        } else {
+                            ActivationTab::Offline
+                        };
 
-                    ui.add_space(12.0);
-                    let context = ui.ctx().clone();
-                    match app.tab {
-                        ActivationTab::Online => online_form(app, ui, context),
-                        ActivationTab::Offline => offline_form(app, ui, context),
+                        ui.add_space(12.0);
+                        let context = ui.ctx().clone();
+                        match app.tab {
+                            ActivationTab::Online => online_form(app, ui, context),
+                            ActivationTab::Offline => offline_form(app, ui, context),
+                        }
                     }
 
                     if app.notice.is_some() {
@@ -87,6 +90,7 @@ pub fn render(app: &mut LicenseApp, ui: &mut egui::Ui) {
                         notice(app, ui);
                     }
 
+                    // 已绑定：只提供当前许可证信息和解绑入口（unbind）
                     if let Some(activation) = app.activation.clone() {
                         ui.add_space(14.0);
                         activation_details(&activation, ui, app);
@@ -176,26 +180,19 @@ fn notice(app: &LicenseApp, ui: &mut egui::Ui) {
     }
 }
 
-fn activation_details(activation: &StoredActivation, ui: &mut egui::Ui, app: &mut LicenseApp) {
+fn activation_details(activation: &Activation, ui: &mut egui::Ui, app: &mut LicenseApp) {
     let source = match activation.source {
         ActivationSource::Online => ("在线激活", Variant::Info),
         ActivationSource::Offline => ("离线激活", Variant::Secondary),
     };
-    let can_deactivate = matches!(activation.source, ActivationSource::Online)
-        && activation.license_key.is_some()
-        && !app.is_busy();
-    let disabled_reason = if !can_deactivate {
-        if matches!(activation.source, ActivationSource::Offline) {
-            Some("只有在线激活许可证可以取消激活")
-        } else if app.is_busy() {
-            Some("当前操作完成后才能取消激活")
-        } else {
-            Some("当前许可证没有可撤销的在线设备席位")
-        }
-    } else {
+    let can_deactivate = !app.is_busy();
+    let disabled_reason = if can_deactivate {
         None
+    } else {
+        Some("当前操作完成后才能取消激活")
     };
     let context = ui.ctx().clone();
+    let claims = &activation.claims;
 
     Card::new()
         .title("当前许可证")
@@ -205,35 +202,22 @@ fn activation_details(activation: &StoredActivation, ui: &mut egui::Ui, app: &mu
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.add(Badge::new(source.0).variant(source.1));
-                if let Some(license) = &activation.license {
-                    ui.add(
-                        Badge::new(status_text(&license.effective_status))
-                            .variant(status_variant(&license.effective_status)),
-                    );
-                } else {
-                    ui.add(Badge::new("令牌已验证").variant(Variant::Success));
-                }
+                ui.add(Badge::new("令牌已验证").variant(Variant::Success));
             });
 
             ui.add_space(12.0);
+            // 展示信息一律取自令牌 claims（签名保护），不使用本地副本
             let mut details = DescriptionList::new().label_width(112.0);
-            if let Some(license) = &activation.license {
-                details = details
-                    .item(
-                        "产品",
-                        format!("{} ({})", license.product.name, license.product.code),
-                    )
-                    .item("许可证状态", status_text(&license.effective_status))
-                    .item("策略", license.policy.name.clone());
-            } else {
-                details = details
-                    .item("产品 ID", wrap_identifier(&activation.claims.aud))
-                    .item("策略 ID", wrap_identifier(&activation.claims.policy_id));
-            }
             details = details
-                .item("许可证 ID", wrap_identifier(&activation.claims.sub))
-                .item("令牌有效期", format_time(activation.claims.exp));
-            if let Some(expiry) = activation.claims.license_expires_at {
+                .item(
+                    "产品",
+                    format!("{} ({})", claims.product_name, claims.product_code),
+                )
+                .item("策略", claims.policy_name.clone())
+                .item("许可证密钥", wrap_identifier(&claims.license_key))
+                .item("许可证 ID", wrap_identifier(&claims.sub))
+                .item("令牌有效期", format_time(claims.exp));
+            if let Some(expiry) = claims.license_expires_at {
                 details = details.item("许可证有效期", format_time(expiry));
             }
             details = details.item("激活时间", format_time(activation.activated_at));
@@ -241,12 +225,17 @@ fn activation_details(activation: &StoredActivation, ui: &mut egui::Ui, app: &mu
 
             ui.add_space(12.0);
             ui.add(Heading::new("授权功能").h4());
-            if activation.claims.entitlements.is_empty() {
+            if claims.entitlements.is_empty() {
                 ui.add(Label::new("未配置授权功能").muted());
             } else {
                 ui.horizontal_wrapped(|ui| {
-                    for entitlement in &activation.claims.entitlements {
-                        Tag::new(entitlement).variant(Variant::Secondary).show(ui);
+                    for entitlement in &claims.entitlements {
+                        let label = if entitlement.name.trim().is_empty() {
+                            &entitlement.code
+                        } else {
+                            &entitlement.name
+                        };
+                        Tag::new(label).variant(Variant::Secondary).show(ui);
                     }
                 });
             }
@@ -259,24 +248,6 @@ fn activation_details(activation: &StoredActivation, ui: &mut egui::Ui, app: &mu
                 response.on_disabled_hover_text(reason);
             }
         });
-}
-
-fn status_text(status: &str) -> String {
-    match status.to_ascii_lowercase().as_str() {
-        "active" => "有效".into(),
-        "inactive" => "未启用".into(),
-        "expired" => "已过期".into(),
-        "suspended" => "已暂停".into(),
-        _ => status.to_owned(),
-    }
-}
-
-fn status_variant(status: &str) -> Variant {
-    match status.to_ascii_lowercase().as_str() {
-        "active" => Variant::Success,
-        "inactive" | "expired" | "suspended" => Variant::Danger,
-        _ => Variant::Warning,
-    }
 }
 
 fn wrap_identifier(value: &str) -> String {

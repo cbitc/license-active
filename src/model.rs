@@ -50,12 +50,25 @@ pub struct TokenClaims {
     pub jti: String,
     pub policy_id: String,
     pub user_id: Option<String>,
-    pub entitlements: Vec<String>,
+    pub license_key: String,
+    pub product_code: String,
+    pub product_name: String,
+    pub policy_name: String,
+    pub issued_at: i64,
+    pub entitlements: Vec<EntitlementClaim>,
     pub fingerprint_sha256: Option<String>,
     pub iat: i64,
     pub nbf: i64,
     pub exp: i64,
     pub license_expires_at: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntitlementClaim {
+    pub code: String,
+    pub name: String,
+    pub expires_at: Option<i64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -69,19 +82,46 @@ pub struct PublicJwk {
     pub key_use: Option<String>,
 }
 
+/// 持久化到本地的唯一数据：token 是签名保护、自包含的权威数据源，
+/// claims 等派生信息在运行时从 token 新鲜解析，不落库。
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StoredActivation {
     pub token: String,
-    pub claims: TokenClaims,
-    pub fingerprint: String,
     pub source: ActivationSource,
-    #[serde(default)]
-    pub license_key: Option<String>,
-    pub license: Option<LicenseDetails>,
     pub activated_at: i64,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+/// 运行时状态：StoredActivation + 从 token 解析出的 claims + 当前设备指纹。
+#[derive(Clone, Debug)]
+pub struct Activation {
+    pub token: String,
+    pub source: ActivationSource,
+    pub activated_at: i64,
+    pub claims: TokenClaims,
+    pub fingerprint: String,
+}
+
+impl Activation {
+    pub fn from_verified(stored: StoredActivation, claims: TokenClaims, fingerprint: String) -> Self {
+        Self {
+            token: stored.token,
+            source: stored.source,
+            activated_at: stored.activated_at,
+            claims,
+            fingerprint,
+        }
+    }
+
+    pub fn stored(&self) -> StoredActivation {
+        StoredActivation {
+            token: self.token.clone(),
+            source: self.source,
+            activated_at: self.activated_at,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActivationSource {
     Online,
